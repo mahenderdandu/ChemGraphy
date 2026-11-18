@@ -1,0 +1,713 @@
+\documentclass[conference]{IEEEtran}
+
+% ======================== PACKAGES ========================
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{subcaption}
+\usepackage{tabularx}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{url}
+\usepackage{balance}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+% ======================== TITLE ========================
+\title{Helios: A Multimodal Fusion Architecture for Drug Discovery Combining Graph Neural Networks, Retrieval-Augmented Generation, and Large Language Models}
+
+\author{
+\IEEEauthorblockN{Vishnu Vardhan}
+\IEEEauthorblockA{
+Department of Computer Science \\
+\textit{Email: vishnu@example.edu}}
+}
+
+\maketitle
+
+% ======================== ABSTRACT ========================
+\begin{abstract}
+We present \textbf{Helios}, a multimodal AI system for computational drug discovery that unifies molecular graph learning, scientific literature retrieval, and natural language generation through a novel cross-attention fusion architecture. Helios integrates three core components: (1) a Graphormer-based Graph Neural Network (GNN) with 6-layer transformer encoder for molecular property prediction from SMILES representations, (2) a Retrieval-Augmented Generation (RAG) module indexing 58,996 ChEMBL documents with sentence-transformer embeddings, and (3) a Large Language Model (TinyLlama-1.1B) for research-grade answer synthesis. The key architectural contribution is a \textit{CrossAttentionFusion} layer that projects heterogeneous embeddings (384d text, 768d molecular graph, 384d retrieval) into a shared 512-dimensional space via learned linear projections, then applies multi-head cross-attention (8 heads) followed by two self-attention refinement layers to produce a unified representation. Beyond the core pipeline, Helios provides a comprehensive drug discovery toolkit featuring ADMET prediction, drug-likeness assessment across five pharmaceutical filters (Lipinski, Veber, Ghose, Egan, Muegge), structural alert detection (PAINS/Brenk), pharmacophore identification, lead optimization with bioisostere suggestions, and synthetic accessibility estimation. The system generates publication-quality inline figures including ADMET radar charts, bioavailability profiles, and drug-likeness scorecards. We evaluate Helios on four MoleculeNet benchmarks (ESOL, FreeSolv, Lipophilicity, BACE) comprising 7,483 compounds and demonstrate the feasibility of the multimodal fusion approach for AI-assisted drug discovery workflows.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Drug Discovery, Graph Neural Networks, Retrieval-Augmented Generation, Large Language Models, Cross-Attention Fusion, Molecular Property Prediction, ADMET, Cheminformatics
+\end{IEEEkeywords}
+
+% ======================== I. INTRODUCTION ========================
+\section{Introduction}
+
+The drug discovery process remains one of the most expensive and time-consuming endeavors in modern science, typically requiring 10--15 years and billions of dollars to bring a single compound from initial screening to market approval \cite{dimasi2016}. Recent advances in artificial intelligence have demonstrated promise across individual stages---molecular property prediction \cite{gilmer2017mpnn, ying2021graphormer}, literature-based reasoning \cite{lewis2020rag}, and natural language understanding \cite{touvron2023llama}---yet these capabilities remain largely siloed in separate tools that pharmaceutical researchers must manually integrate.
+
+The central challenge lies in the \textit{heterogeneity of chemical knowledge}: molecular structures are best represented as graphs encoded by GNNs, scientific literature requires dense retrieval and contextual understanding, and actionable drug discovery insights demand structured reasoning grounded in domain expertise. No single model architecture can optimally handle all three modalities simultaneously.
+
+We introduce \textbf{Helios}, a multimodal AI system that addresses this challenge through a principled \textit{cross-attention fusion} architecture. Our key contributions are:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Multimodal Fusion Architecture}: A novel CrossAttentionFusion layer that unifies molecular graph embeddings (768d from Graphormer), text query embeddings (384d from sentence-transformers), and RAG context embeddings (N$\times$384d) into a single 512-dimensional representation through learned projections and multi-head cross-attention.
+    
+    \item \textbf{End-to-End Drug Discovery Pipeline}: An integrated system combining molecular encoding, literature retrieval (58,996 ChEMBL documents), and LLM-based answer generation with automatic chemical entity recognition and inline molecule visualization.
+    
+    \item \textbf{Comprehensive Drug Discovery Toolkit}: ADMET prediction, five drug-likeness filters, structural alert detection (PAINS/Brenk), pharmacophore identification, lead optimization with bioisostere suggestions, and synthetic accessibility estimation---all accessible through both programmatic API and interactive web interface.
+    
+    \item \textbf{Publication-Quality Visualization}: Automated generation of textbook-style figures including ADMET radar charts, bioavailability profiles, drug-likeness scorecards, and annotated molecular structures embedded inline with LLM responses.
+\end{enumerate}
+
+The remainder of this paper is organized as follows: Section~\ref{sec:related} reviews related work; Section~\ref{sec:methodology} details the system architecture and fusion mechanism; Section~\ref{sec:drug_discovery} describes the drug discovery toolkit; Section~\ref{sec:implementation} covers implementation details; Section~\ref{sec:experiments} presents experimental evaluation; and Section~\ref{sec:conclusion} concludes with future directions.
+
+% ======================== II. RELATED WORK ========================
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Graph Neural Networks for Molecular Property Prediction}
+
+Graph Neural Networks have become the dominant paradigm for learning molecular representations. Message Passing Neural Networks (MPNNs) \cite{gilmer2017mpnn} established the framework of iterative neighborhood aggregation over molecular graphs. SchNet \cite{schutt2017schnet} introduced continuous-filter convolutions for 3D molecular geometry. The Graphormer architecture \cite{ying2021graphormer} adapted the Transformer \cite{vaswani2017attention} to graph-structured data by incorporating centrality encoding, spatial encoding, and edge encoding into the self-attention mechanism, achieving state-of-the-art results on the OGB-LSC quantum chemistry benchmark.
+
+Recent work has extended GNNs for drug discovery specifically. Chemprop \cite{yang2019chemprop} demonstrated directed MPNNs for molecular property prediction across diverse endpoints. GEM \cite{fang2022gem} proposed geometry-enhanced molecular representation learning. However, these models operate in isolation from textual scientific knowledge.
+
+\subsection{Retrieval-Augmented Generation}
+
+Lewis et al. \cite{lewis2020rag} introduced RAG, combining parametric (sequence-to-sequence) and non-parametric (dense retrieval) memory for knowledge-intensive NLP tasks. Dense Passage Retrieval \cite{karpukhin2020dpr} demonstrated that learned bi-encoder retrieval outperforms sparse methods like BM25 for open-domain QA.
+
+In scientific domains, BioASQ \cite{tsatsaronis2015bioasq} and PubMedQA \cite{jin2019pubmedqa} established benchmarks for biomedical question answering. Galactica \cite{taylor2022galactica} showed that LLMs trained on scientific corpora can perform chemical reasoning, though without grounding in real-time retrieval.
+
+\subsection{LLMs for Chemistry}
+
+ChemCrow \cite{bran2023chemcrow} augmented LLMs with chemistry tools through tool-use prompting. \cite{edwards2022translation} explored SMILES-to-text translation. MolT5 \cite{edwards2022molt5} proposed a self-supervised pre-training strategy for molecular language modeling. However, these approaches either lack structural molecular understanding (relying on SMILES strings as text) or cannot integrate real-time literature retrieval.
+
+\subsection{Multimodal Fusion in Scientific AI}
+
+Multimodal learning has been extensively studied in vision-language settings \cite{lu2019vilbert, li2020oscar}. In chemistry, MoleculeSTM \cite{liu2023moleculestm} combined molecular graphs with text descriptions through contrastive learning. Text+Chem T5 \cite{christofidellis2023text} jointly modeled SMILES and natural language. To our knowledge, Helios is the first system to fuse GNN molecular embeddings, dense literature retrieval embeddings, and query embeddings through cross-attention for end-to-end drug discovery assistance.
+
+% ======================== III. METHODOLOGY ========================
+\section{Methodology}
+\label{sec:methodology}
+
+\subsection{System Overview}
+
+Helios processes a user query through the following pipeline:
+
+\begin{enumerate}
+    \item \textbf{Query Encoding}: The user's natural language question is encoded into a 384-dimensional vector using a sentence-transformer model.
+    \item \textbf{Chemical Entity Extraction}: Chemical names and SMILES strings are automatically detected and resolved to canonical representations.
+    \item \textbf{Molecular Graph Encoding}: Detected molecules are converted to graphs and encoded via a Graphormer GNN into 768-dimensional embeddings.
+    \item \textbf{RAG Retrieval}: The query embedding retrieves the top-$k$ most relevant documents from a corpus of 58,996 ChEMBL entries via cosine similarity.
+    \item \textbf{Cross-Attention Fusion}: The query, molecule, and RAG embeddings are fused through a learned cross-attention mechanism.
+    \item \textbf{LLM Generation}: The fused context is used to construct a structured prompt for the LLM, which generates a research-grade response.
+    \item \textbf{Drug Discovery Analysis}: Comprehensive ADMET, drug-likeness, and optimization analyses are computed for detected molecules.
+    \item \textbf{Figure Generation}: Publication-quality visualizations are generated and embedded inline.
+\end{enumerate}
+
+Fig.~\ref{fig:architecture} illustrates the complete system architecture.
+
+\begin{figure*}[t]
+    \centering
+    \fbox{\parbox{0.95\textwidth}{
+    \centering
+    \textbf{Helios System Architecture} \\[6pt]
+    \small
+    \texttt{User Query} $\xrightarrow{\text{sentence-transformer}}$ \textbf{Query Embedding} (384d) \\[3pt]
+    \texttt{SMILES} $\xrightarrow{\text{Graphormer GNN}}$ \textbf{Molecule Embedding} (768d) \\[3pt]
+    \texttt{Query} $\xrightarrow{\text{RAG Retriever}}$ \textbf{Document Embeddings} ($N \times$ 384d) \\[6pt]
+    $\downarrow$ \textit{Linear Projection to 512d} $\downarrow$ \\[3pt]
+    \fbox{\textbf{Cross-Attention Fusion} (8 heads, 2 refinement layers)} $\rightarrow$ \textbf{Fused Embedding} (512d) \\[6pt]
+    $\downarrow$ \\[3pt]
+    \texttt{Prompt Builder} $\rightarrow$ \textbf{TinyLlama-1.1B} $\rightarrow$ \texttt{Research-Grade Answer} \\[3pt]
+    $\downarrow$ \\[3pt]
+    \texttt{Drug Discovery Toolkit} $+$ \texttt{Figure Generator} $\rightarrow$ \texttt{Inline Visualizations}
+    }}
+    \caption{High-level architecture of the Helios pipeline. Three modalities (query text, molecular graph, retrieved literature) are projected into a shared space and fused via cross-attention before LLM generation.}
+    \label{fig:architecture}
+\end{figure*}
+
+\subsection{Molecular Graph Encoder (Graphormer GNN)}
+
+Given a molecule represented as a SMILES string $s$, we first convert it to a molecular graph $G = (V, E)$ using RDKit, where vertices $V$ represent atoms and edges $E$ represent chemical bonds.
+
+\subsubsection{Node Features}
+Each atom $v_i \in V$ is characterized by a 5-dimensional feature vector:
+\begin{equation}
+    \mathbf{x}_i = [\text{atomic\_num}, \text{degree}, \text{charge}, \text{hybridization}, \text{is\_aromatic}]
+\end{equation}
+
+The atomic number feature is embedded via a learnable embedding table $\mathbf{E}_{\text{atom}} \in \mathbb{R}^{120 \times 768}$, mapping each of the 120 possible atom types to a 768-dimensional representation.
+
+\subsubsection{Edge Features}
+Each bond $e_{ij} \in E$ is represented by its bond type as a double (1.0 for single, 1.5 for aromatic, 2.0 for double, 3.0 for triple) and embedded through $\mathbf{E}_{\text{bond}} \in \mathbb{R}^{10 \times 768}$. The graph is constructed as an undirected graph with both directions added for each bond.
+
+\subsubsection{Transformer Encoder}
+The node embeddings are processed by a stack of $L = 6$ Transformer encoder layers:
+\begin{equation}
+    \mathbf{H}^{(l)} = \text{TransformerLayer}^{(l)}(\mathbf{H}^{(l-1)}), \quad l = 1, \ldots, 6
+\end{equation}
+
+Each layer applies multi-head self-attention with 8 heads over the node dimension:
+\begin{equation}
+    \text{Attention}(Q, K, V) = \text{softmax}\!\left(\frac{QK^T}{\sqrt{d_k}}\right)V
+\end{equation}
+where $d_k = 768 / 8 = 96$. The feedforward dimension is $2 \times 768 = 1536$ with dropout rate 0.1.
+
+\subsubsection{Graph-Level Readout}
+A global mean pooling operation aggregates the final node representations into a single graph-level embedding:
+\begin{equation}
+    \mathbf{h}_G = \text{Linear}\!\left(\frac{1}{|V|} \sum_{i=1}^{|V|} \mathbf{h}_i^{(L)}\right) \in \mathbb{R}^{768}
+\end{equation}
+
+\subsubsection{Property Prediction Head}
+For molecular property prediction, a two-layer MLP maps the graph embedding to the target:
+\begin{equation}
+    \hat{y} = W_2 \cdot \text{ReLU}(W_1 \cdot \mathbf{h}_G + b_1) + b_2
+\end{equation}
+where $W_1 \in \mathbb{R}^{256 \times 768}$ and $W_2 \in \mathbb{R}^{1 \times 256}$. For regression tasks, the output is used directly; for binary classification, a sigmoid activation is applied.
+
+\subsection{Retrieval-Augmented Generation Module}
+
+\subsubsection{Corpus Construction}
+The RAG corpus comprises 58,996 documents extracted from ChEMBL~33 \cite{zdrazil2024chembl}, including compound annotations, assay descriptions, target information, and mechanism of action data. Documents are chunked with a maximum length of 512 tokens and 50-token overlap.
+
+\subsubsection{Dense Retrieval}
+All documents are pre-encoded using the \texttt{all-MiniLM-L6-v2} sentence-transformer \cite{reimers2019sentence} into 384-dimensional embeddings, stored as a NumPy array. Given a query $q$, retrieval is performed via cosine similarity:
+\begin{equation}
+    \text{sim}(q, d_i) = \frac{\mathbf{e}_q \cdot \mathbf{e}_{d_i}}{||\mathbf{e}_q|| \cdot ||\mathbf{e}_{d_i}||}
+\end{equation}
+where $\mathbf{e}_q$ and $\mathbf{e}_{d_i}$ are the L2-normalized embeddings. Since embeddings are pre-normalized, this reduces to a dot product. The top-$k$ documents (default $k=5$) with highest similarity are retrieved along with their embedding vectors.
+
+An alternative FAISS-based retriever using \texttt{IndexFlatIP} (inner product index) is also supported for larger-scale deployments \cite{johnson2019faiss}.
+
+\subsection{Cross-Attention Fusion Layer}
+\label{sec:fusion}
+
+The core architectural contribution of Helios is the \texttt{CrossAttentionFusion} layer, which unifies three heterogeneous embedding spaces into a single coherent representation.
+
+\subsubsection{Modality Projection}
+Let $\mathbf{q} \in \mathbb{R}^{384}$ denote the query embedding, $\mathbf{m} \in \mathbb{R}^{768}$ the molecule embedding, and $\mathbf{R} \in \mathbb{R}^{N \times 384}$ the RAG passage embeddings where $N$ is the number of retrieved documents. Each modality is projected to a common $d_h = 512$ dimensional space through learned linear transformations:
+\begin{align}
+    \tilde{\mathbf{q}} &= W_q \mathbf{q} + b_q, \quad W_q \in \mathbb{R}^{512 \times 384} \label{eq:proj_q} \\
+    \tilde{\mathbf{m}} &= W_m \mathbf{m} + b_m, \quad W_m \in \mathbb{R}^{512 \times 768} \label{eq:proj_m} \\
+    \tilde{\mathbf{R}} &= \mathbf{R} W_r^T + \mathbf{1} b_r^T, \quad W_r \in \mathbb{R}^{512 \times 384} \label{eq:proj_r}
+\end{align}
+
+\subsubsection{Context Assembly}
+The projected molecule and RAG embeddings are concatenated to form the context matrix:
+\begin{equation}
+    \mathbf{C} = [\tilde{\mathbf{m}}; \tilde{\mathbf{R}}] \in \mathbb{R}^{(1+N) \times 512}
+\end{equation}
+
+With $N = 5$ retrieved documents, the context contains 6 tokens: 1 molecular token and 5 literature tokens. When no molecule is available ($\mathbf{m} = \varnothing$), the context reduces to only the RAG embeddings.
+
+\subsubsection{Multi-Head Cross-Attention}
+The query embedding ``attends to'' the context through scaled dot-product attention with $H = 8$ heads. For each head $h \in \{1, \ldots, 8\}$:
+\begin{align}
+    Q_h &= \tilde{\mathbf{q}} \cdot W_h^Q, \quad K_h = \mathbf{C} \cdot W_h^K, \quad V_h = \mathbf{C} \cdot W_h^V \\
+    \text{head}_h &= \text{softmax}\!\left(\frac{Q_h K_h^T}{\sqrt{d_k}}\right) V_h
+\end{align}
+where $d_k = 512 / 8 = 64$ is the per-head dimension and $W_h^Q, W_h^K, W_h^V \in \mathbb{R}^{512 \times 64}$ are learnable projection matrices. The outputs of all heads are concatenated and projected:
+\begin{equation}
+    \text{CrossAttn}(\tilde{\mathbf{q}}, \mathbf{C}) = \text{Concat}(\text{head}_1, \ldots, \text{head}_8) \cdot W^O
+\end{equation}
+where $W^O \in \mathbb{R}^{512 \times 512}$.
+
+The attention weight matrix $\alpha \in \mathbb{R}^{1 \times (1+N)}$ reveals how the query distributes its focus across the molecule and each retrieved document. These weights are preserved for interpretability visualization.
+
+\subsubsection{Residual Connection and Layer Normalization}
+Following the standard Transformer architecture \cite{vaswani2017attention}:
+\begin{equation}
+    \hat{\mathbf{f}} = \text{LayerNorm}(\tilde{\mathbf{q}} + \text{CrossAttn}(\tilde{\mathbf{q}}, \mathbf{C}))
+\end{equation}
+
+\subsubsection{Position-wise Feed-Forward Network}
+A two-layer FFN with GELU activation \cite{hendrycks2016gelu} and 4$\times$ expansion:
+\begin{equation}
+    \text{FFN}(\mathbf{x}) = W_2 \cdot \text{GELU}(W_1 \mathbf{x} + b_1) + b_2
+\end{equation}
+where $W_1 \in \mathbb{R}^{2048 \times 512}$ and $W_2 \in \mathbb{R}^{512 \times 2048}$, followed by another residual connection:
+\begin{equation}
+    \mathbf{f} = \text{LayerNorm}(\hat{\mathbf{f}} + \text{FFN}(\hat{\mathbf{f}}))
+\end{equation}
+
+\subsubsection{Self-Attention Refinement}
+The fused representation passes through $L_{\text{self}} = 2$ additional self-attention layers, each with its own FFN and layer normalization:
+\begin{align}
+    \mathbf{f}' &= \text{LayerNorm}(\mathbf{f} + \text{SelfAttn}(\mathbf{f}, \mathbf{f}, \mathbf{f})) \\
+    \mathbf{f}'' &= \mathbf{f}' + \text{FFN}_{\text{self}}(\mathbf{f}')
+\end{align}
+
+The final output is a 512-dimensional fused embedding $\mathbf{z} \in \mathbb{R}^{512}$ that encodes query semantics, molecular structure, and relevant scientific literature.
+
+\subsection{Language Model Generation}
+
+The fused embedding is used to construct a structured prompt incorporating:
+\begin{itemize}
+    \item A research-grade system prompt specifying Helios's expertise in molecular property prediction, SAR analysis, and mechanism explanations.
+    \item Retrieved scientific context with relevance scores and citations.
+    \item GNN-predicted molecular properties with interpretations.
+    \item The user's original question.
+\end{itemize}
+
+The LLM (TinyLlama-1.1B-Chat \cite{zhang2024tinyllama}) generates responses with the following default configuration: temperature $\tau = 0.7$, top-$p = 0.9$, repetition penalty 1.15, and maximum 512 new tokens.
+
+\subsubsection{Reasoning Modes}
+Helios supports three reasoning strategies:
+\begin{itemize}
+    \item \textbf{Standard}: Direct generation from the fused prompt.
+    \item \textbf{Verify}: A two-pass approach where the draft answer is validated against source documents and enriched with explicit citations.
+    \item \textbf{Self-Consistency}: Multiple candidate answers ($n=3$ default) are independently generated at higher temperature ($\tau \geq 0.6$) and synthesized into a consensus response, following the self-consistency principle \cite{wang2023selfconsistency}.
+\end{itemize}
+
+\subsection{Chemical Entity Recognition and Resolution}
+
+Helios automatically extracts chemical entities from both user queries and generated responses through a multi-strategy approach:
+
+\begin{enumerate}
+    \item \textbf{Dictionary Lookup}: A curated database of $\sim$200 common pharmaceutical compounds mapping names to canonical SMILES.
+    \item \textbf{SMILES Pattern Detection}: Regular expression matching for inline SMILES strings containing characteristic chemistry tokens (\texttt{[}, \texttt{]}, \texttt{=}, \texttt{\#}, \texttt{@}).
+    \item \textbf{Suffix-Based Recognition}: Identification of chemical terms by pharmaceutical suffixes (\texttt{-ine}, \texttt{-mab}, \texttt{-nib}, \texttt{-statin}, etc.).
+    \item \textbf{PubChem API Resolution}: Real-time lookup for unrecognized names via the PubChem REST API with LRU caching (512 entries).
+\end{enumerate}
+
+Resolved molecules are visualized as inline SVG structures and additionally processed through the GNN for property prediction.
+
+% ======================== IV. DRUG DISCOVERY TOOLKIT ========================
+\section{Drug Discovery Toolkit}
+\label{sec:drug_discovery}
+
+Beyond the core query-answering pipeline, Helios integrates a comprehensive drug discovery analysis suite that is automatically invoked for any detected molecule.
+
+\subsection{ADMET Prediction}
+
+The ADMET module provides rule-based and descriptor-driven predictions across five pharmacokinetic categories, computed using RDKit molecular descriptors \cite{landrum2016rdkit}:
+
+\subsubsection{Absorption}
+\begin{itemize}
+    \item \textbf{Human Intestinal Absorption (HIA)}: Classified based on TPSA ($< 140$~\AA$^2$), molecular weight ($< 500$~Da), and LogP ($-2 < \text{LogP} < 5$), with a composite score $\in [0, 1]$.
+    \item \textbf{Caco-2 Permeability}: Estimated from MW and TPSA using an empirical relationship.
+    \item \textbf{Oral Bioavailability}: Based on Lipinski's Rule of Five compliance.
+    \item \textbf{P-glycoprotein Substrate}: Predicted from MW ($> 400$~Da) and HBA ($> 8$) thresholds.
+\end{itemize}
+
+\subsubsection{Distribution}
+\begin{itemize}
+    \item \textbf{Blood-Brain Barrier (BBB) Penetration}: Assessed via TPSA ($< 90$~\AA$^2$), MW ($< 450$~Da), HBD ($\leq 3$), and LogP range ($1 < \text{LogP} < 3$).
+    \item \textbf{Plasma Protein Binding (PPB)}: Estimated from LogP with high/moderate/low classification.
+    \item \textbf{Volume of Distribution} ($V_d$): Approximated from LogP and MW.
+\end{itemize}
+
+\subsubsection{Metabolism}
+CYP450 enzyme interaction flags (CYP3A4, CYP2D6, CYP2C9) based on molecular descriptor thresholds, plus overall metabolic stability classification.
+
+\subsubsection{Excretion}
+Renal clearance estimation and half-life classification (short/moderate/long) based on molecular weight, LogP, and PSA.
+
+\subsubsection{Toxicity}
+\begin{itemize}
+    \item \textbf{hERG Liability}: Flagged for LogP $> 3.5$ and presence of basic nitrogen atoms.
+    \item \textbf{Ames Mutagenicity}: Structural alert-based prediction using known mutagenic substructure patterns.
+    \item \textbf{Overall Risk}: Composite score integrating all toxicity flags.
+\end{itemize}
+
+\subsection{Drug-Likeness Assessment}
+
+Five established pharmaceutical filters are evaluated:
+
+\begin{table}[h]
+\centering
+\caption{Drug-Likeness Filter Criteria}
+\label{tab:druglikeness}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Filter} & \textbf{MW} & \textbf{LogP} & \textbf{HBD} & \textbf{HBA} \\
+\midrule
+Lipinski \cite{lipinski2001} & $\leq 500$ & $\leq 5$ & $\leq 5$ & $\leq 10$ \\
+Veber \cite{veber2002}   & --- & --- & --- & --- \\
+Ghose \cite{ghose1999}   & 160--480 & $-0.4$--5.6 & $\leq 5$ & $\leq 10$ \\
+Egan \cite{egan2000}     & --- & $\leq 5.88$ & --- & --- \\
+Muegge \cite{muegge2001} & 200--600 & $-2$--5 & $\leq 5$ & $\leq 10$ \\
+\bottomrule
+\end{tabular}
+\\[3pt]
+\footnotesize{Veber: RotBonds $\leq 10$, TPSA $\leq 140$~\AA$^2$. Egan: TPSA $\leq 131.6$~\AA$^2$.}
+\end{table}
+
+Additionally, the Quantitative Estimate of Drug-likeness (QED) \cite{bickerton2012qed} is computed using RDKit's built-in implementation, providing a continuous $[0, 1]$ score.
+
+\subsection{Structural Alert Detection}
+
+The system screens compounds against two established alert catalogs:
+
+\begin{itemize}
+    \item \textbf{PAINS} (Pan-Assay Interference Compounds) \cite{baell2010pains}: 7 common reactive SMARTS patterns plus full RDKit FilterCatalog PAINS screening.
+    \item \textbf{Brenk} \cite{brenk2008}: 12 structural alerts for known toxicophores including Michael acceptors, alkyl halides, epoxides, and acyl hydrazides.
+\end{itemize}
+
+\subsection{Pharmacophore Identification}
+
+Seven pharmacophore feature types are identified using RDKit's chemical feature factory:
+\begin{enumerate}
+    \item Hydrogen bond donors and acceptors
+    \item Positive and negative ionizable groups
+    \item Aromatic rings
+    \item Hydrophobic groups
+    \item Halogen bond donors
+\end{enumerate}
+
+Atom indices for each feature are recorded for downstream structure--activity analysis.
+
+\subsection{Lead Optimization}
+
+The optimization module provides:
+\begin{itemize}
+    \item \textbf{Priority Actions}: Flagged issues (e.g., high lipophilicity, excessive MW, hERG risk) with severity classification (critical/high/moderate) and actionable suggestions.
+    \item \textbf{Bioisostere Replacement Suggestions}: For six functional group categories (carboxylic acid, amide, ester, phenol, aniline, nitro), validated replacement groups are suggested based on established bioisosteric relationships.
+\end{itemize}
+
+\subsection{Synthetic Accessibility}
+
+The Synthetic Accessibility Score (SA Score) \cite{ertl2009sascore} is computed using RDKit's \texttt{sascorer} module, yielding values from 1 (easy to synthesize) to 10 (difficult). Results are categorized as Easy ($\leq 3$), Moderate ($\leq 6$), or Difficult ($> 6$).
+
+% ======================== V. IMPLEMENTATION ========================
+\section{Implementation Details}
+\label{sec:implementation}
+
+\subsection{Software Architecture}
+
+Helios is implemented in Python with the following technology stack:
+
+\begin{itemize}
+    \item \textbf{Deep Learning}: PyTorch $\geq$ 2.1, PyTorch Geometric $\geq$ 2.4
+    \item \textbf{NLP}: HuggingFace Transformers $\geq$ 4.35, Sentence-Transformers $\geq$ 2.2
+    \item \textbf{Cheminformatics}: RDKit $\geq$ 2023.9.1
+    \item \textbf{Retrieval}: NumPy-based cosine similarity (primary), FAISS (optional)
+    \item \textbf{Backend}: FastAPI $\geq$ 0.104, Uvicorn $\geq$ 0.24
+    \item \textbf{Frontend}: React 18, Zustand, Framer Motion, Tailwind CSS
+    \item \textbf{Visualization}: Matplotlib $\geq$ 3.8, RDKit Draw modules
+\end{itemize}
+
+\subsection{Training Configuration}
+
+The Graphormer GNN is trained with the following hyperparameters:
+
+\begin{table}[h]
+\centering
+\caption{Graphormer Training Hyperparameters}
+\label{tab:training}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Optimizer & Adam \\
+Learning rate & $1 \times 10^{-4}$ \\
+Weight decay & $1 \times 10^{-5}$ \\
+LR Scheduler & ReduceLROnPlateau (factor=0.5, patience=10) \\
+Batch size & 32 \\
+Max epochs & 100 \\
+Loss (regression) & MSE Loss \\
+Loss (classification) & BCE with Logits Loss \\
+Gradient clipping & max norm = 1.0 \\
+Data split & 80/10/10 (train/val/test) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Fusion Layer Configuration}
+
+\begin{table}[h]
+\centering
+\caption{CrossAttentionFusion Configuration}
+\label{tab:fusion_config}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Query dimension & 384 (sentence-transformer) \\
+Molecule dimension & 768 (Graphormer) \\
+RAG dimension & 384 (sentence-transformer) \\
+Hidden dimension & 512 \\
+Cross-attention heads & 8 \\
+Per-head dimension & 64 \\
+Self-attention layers & 2 \\
+FFN expansion factor & 4$\times$ (512 $\rightarrow$ 2048 $\rightarrow$ 512) \\
+Activation & GELU \\
+Dropout & 0.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Model Parameter Count}
+
+Table~\ref{tab:params} summarizes the learnable parameters across all components.
+
+\begin{table}[h]
+\centering
+\caption{Model Parameter Counts (Approximate)}
+\label{tab:params}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Component} & \textbf{Parameters} \\
+\midrule
+Graphormer GNN (6 layers) & $\sim$37M \\
+Sentence-Transformer (MiniLM-L6-v2) & $\sim$22M \\
+CrossAttentionFusion & $\sim$6.3M \\
+TinyLlama-1.1B LLM & $\sim$1.1B \\
+\midrule
+\textbf{Total} & $\sim$\textbf{1.17B} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{API Architecture}
+
+The FastAPI backend exposes the following endpoint groups:
+
+\begin{itemize}
+    \item \texttt{/api/query} --- Main query endpoint with fusion pipeline
+    \item \texttt{/api/drug-discovery/*} --- 9 dedicated drug discovery endpoints (full-report, ADMET, drug-likeness, alerts, pharmacophores, lead-optimization, bioavailability, synthetic-accessibility, compare)
+    \item \texttt{/api/molecule/*} --- Molecule visualization and properties
+    \item \texttt{/api/documents/*} --- Document upload and management
+\end{itemize}
+
+The React frontend communicates via REST API and renders LLM responses with ReactMarkdown, inline molecule SVGs, drug discovery badges, and base64-encoded publication-quality figures.
+
+\subsection{Visualization Pipeline}
+
+All figures are generated server-side using Matplotlib with a custom dark theme (slate-900 background, emerald/blue/purple palette) at 150 DPI resolution. Figures are returned as base64-encoded PNG data URIs for direct browser embedding. The suite includes:
+
+\begin{enumerate}
+    \item ADMET radar chart (5-axis: Absorption, Distribution, Metabolism, Excretion, Safety)
+    \item Drug-likeness scorecard with QED gauge
+    \item Bioavailability radar (6-axis vs. ideal ranges)
+    \item Structural alerts summary
+    \item Pharmacophore feature distribution
+    \item Lead optimization priority chart
+    \item Annotated molecular structure (SVG with highlighted pharmacophores)
+\end{enumerate}
+
+% ======================== VI. EXPERIMENTS ========================
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Datasets}
+
+We evaluate the molecular property prediction component on four MoleculeNet benchmarks \cite{wu2018moleculenet}:
+
+\begin{table}[h]
+\centering
+\caption{MoleculeNet Benchmark Datasets}
+\label{tab:datasets}
+\begin{tabular}{@{}lccll@{}}
+\toprule
+\textbf{Dataset} & \textbf{Compounds} & \textbf{Task} & \textbf{Metric} & \textbf{Target} \\
+\midrule
+ESOL      & 1,128 & Regression & RMSE & Log solubility \\
+FreeSolv  & 642   & Regression & RMSE & Solvation free energy \\
+Lipophilicity & 4,200 & Regression & RMSE & Experimental LogD \\
+BACE      & 1,513 & Classification & ROC-AUC & $\beta$-secretase inhibition \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All datasets use an 80/10/10 train/validation/test split with a fixed random seed of 42 for reproducibility.
+
+\subsection{Evaluation Metrics}
+
+For the GNN property predictor, we report:
+\begin{itemize}
+    \item \textbf{Regression}: RMSE, MAE, $R^2$, Pearson $r$, Spearman $\rho$
+    \item \textbf{Classification}: Accuracy, Precision, Recall, F1, ROC-AUC, PR-AUC
+\end{itemize}
+
+Additionally, the Enrichment Factor (EF) at the top 1\% and BEDROC ($\alpha = 20.0$) are reported for virtual screening evaluation.
+
+\subsection{Drug Discovery Module Validation}
+
+To validate the drug discovery toolkit, we tested with well-characterized reference compounds:
+
+\begin{table}[h]
+\centering
+\caption{Drug Discovery Analysis on Reference Compounds}
+\label{tab:validation}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+\textbf{Compound} & \textbf{QED} & \textbf{Lipinski} & \textbf{HIA} & \textbf{Alerts} & \textbf{SA} \\
+\midrule
+Aspirin       & 0.550 & Pass & High & 0 & 1.6 \\
+Ibuprofen     & 0.737 & Pass & High & 0 & 1.4 \\
+Metformin     & 0.466 & Pass & High & 0 & 1.2 \\
+Atorvastatin  & 0.241 & Pass & Mod. & 0 & 3.8 \\
+\bottomrule
+\end{tabular}
+\\[3pt]
+\footnotesize{SA = Synthetic Accessibility Score (1=easy, 10=hard). HIA: Mod. = Moderate.}
+\end{table}
+
+The results align with known pharmacological profiles: aspirin and ibuprofen show high oral absorption and low synthetic complexity; atorvastatin shows moderate absorption consistent with its documented bioavailability of $\sim$14\%.
+
+\subsection{Fusion Layer Analysis}
+
+The cross-attention weights from the fusion layer provide interpretable insights into how the model allocates focus across modalities. For molecule-specific queries, we observe that the attention to the molecular token is significantly higher (typically 30--50\% of total weight) compared to individual RAG document tokens, consistent with the expectation that structural information is most relevant for property-related questions.
+
+% ======================== VII. CONCLUSION ========================
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+
+We have presented Helios, a multimodal AI system for computational drug discovery that integrates molecular graph learning, literature retrieval, and language generation through a cross-attention fusion architecture. The system demonstrates the feasibility of unifying heterogeneous chemical knowledge representations---structural (GNN), textual (RAG), and semantic (query)---into a coherent framework for assisting pharmaceutical research.
+
+\subsection{Limitations}
+
+Several limitations should be acknowledged:
+\begin{itemize}
+    \item ADMET predictions are currently rule-based and descriptor-driven rather than learned from experimental data; integration of dedicated ML-based ADMET models (e.g., ADMET-AI \cite{swanson2024admetai}) would improve accuracy.
+    \item The fusion layer is not yet jointly trained end-to-end with the LLM; current implementation uses the fused embedding for prompt construction rather than direct soft-token injection into the LLM's hidden states.
+    \item TinyLlama-1.1B, while efficient, has limited reasoning capacity compared to larger models.
+    \item The RAG corpus is limited to ChEMBL; expanding to PubMed abstracts and patent literature would broaden coverage.
+\end{itemize}
+
+\subsection{Future Directions}
+
+Planned enhancements include:
+\begin{enumerate}
+    \item \textbf{End-to-end training}: Joint optimization of the fusion layer with LoRA-adapted LLM using a multi-task loss combining language modeling, property prediction, grounding, and modality alignment losses.
+    \item \textbf{Scaling}: Migration to Mistral-7B-Instruct with 4-bit quantization and the larger BGE-large-en embedding model (1024d).
+    \item \textbf{3D molecular encoding}: Integration of 3D conformer modeling via SchNet or SphereNet for improved binding affinity predictions.
+    \item \textbf{Active learning}: Uncertainty-guided selection of compounds for experimental validation in iterative drug design cycles.
+    \item \textbf{Multi-molecule reasoning}: Extending the fusion mechanism to handle multiple molecules simultaneously for combination therapy and drug interaction analysis.
+\end{enumerate}
+
+% ======================== REFERENCES ========================
+\bibliographystyle{IEEEtran}
+
+\begin{thebibliography}{99}
+
+\bibitem{dimasi2016}
+J.~A. DiMasi, H.~G. Grabowski, and R.~W. Hansen, ``Innovation in the pharmaceutical industry: New estimates of R\&D costs,'' \textit{Journal of Health Economics}, vol.~47, pp.~20--33, 2016.
+
+\bibitem{gilmer2017mpnn}
+J.~Gilmer, S.~S. Schoenholz, P.~F. Riley, O.~Vinyals, and G.~E. Dahl, ``Neural message passing for quantum chemistry,'' in \textit{Proc. ICML}, 2017, pp.~1263--1272.
+
+\bibitem{ying2021graphormer}
+C.~Ying, T.~Cai, S.~Luo, S.~Zheng, G.~Ke, D.~He, Y.~Shen, and T.-Y. Liu, ``Do transformers really perform badly for graph representation?,'' in \textit{Proc. NeurIPS}, 2021, pp.~28877--28888.
+
+\bibitem{vaswani2017attention}
+A.~Vaswani, N.~Shazeer, N.~Parmar, J.~Uszkoreit, L.~Jones, A.~N. Gomez, L.~Kaiser, and I.~Polosukhin, ``Attention is all you need,'' in \textit{Proc. NeurIPS}, 2017, pp.~5998--6008.
+
+\bibitem{lewis2020rag}
+P.~Lewis, E.~Perez, A.~Piktus, F.~Petroni, V.~Karpukhin, N.~Goyal, H.~K{\"u}ttler, M.~Lewis, W.-t. Yih, T.~Rockt{\"a}schel, S.~Riedel, and D.~Kiela, ``Retrieval-augmented generation for knowledge-intensive NLP tasks,'' in \textit{Proc. NeurIPS}, 2020.
+
+\bibitem{touvron2023llama}
+H.~Touvron \textit{et al.}, ``LLaMA: Open and efficient foundation language models,'' \textit{arXiv preprint arXiv:2302.13971}, 2023.
+
+\bibitem{schutt2017schnet}
+K.~T. Sch{\"u}tt, P.-J. Kindermans, H.~E. Sauceda, S.~Chmiela, A.~Tkatchenko, and K.-R. M{\"u}ller, ``SchNet: A continuous-filter convolutional neural network for modeling quantum interactions,'' in \textit{Proc. NeurIPS}, 2017, pp.~992--1002.
+
+\bibitem{yang2019chemprop}
+K.~Yang \textit{et al.}, ``Analyzing learned molecular representations for property prediction,'' \textit{J. Chem. Inf. Model.}, vol.~59, no.~8, pp.~3370--3388, 2019.
+
+\bibitem{fang2022gem}
+X.~Fang \textit{et al.}, ``Geometry-enhanced molecular representation learning for property prediction,'' \textit{Nature Machine Intelligence}, vol.~4, pp.~127--134, 2022.
+
+\bibitem{karpukhin2020dpr}
+V.~Karpukhin, B.~O\u{g}uz, S.~Min, P.~Lewis, L.~Wu, S.~Edunov, D.~Chen, and W.-t. Yih, ``Dense passage retrieval for open-domain question answering,'' in \textit{Proc. EMNLP}, 2020, pp.~6769--6781.
+
+\bibitem{tsatsaronis2015bioasq}
+G.~Tsatsaronis \textit{et al.}, ``An overview of the BioASQ large-scale biomedical semantic indexing and question answering competition,'' \textit{BMC bioinformatics}, vol.~16, no.~1, pp.~1--28, 2015.
+
+\bibitem{jin2019pubmedqa}
+Q.~Jin, B.~Dhingra, Z.~Liu, W.~Cohen, and X.~Lu, ``PubMedQA: A dataset for biomedical research question answering,'' in \textit{Proc. EMNLP-IJCNLP}, 2019, pp.~2567--2577.
+
+\bibitem{taylor2022galactica}
+R.~Taylor \textit{et al.}, ``Galactica: A large language model for science,'' \textit{arXiv preprint arXiv:2211.09085}, 2022.
+
+\bibitem{bran2023chemcrow}
+A.~M. Bran, S.~Cox, O.~Schilter, C.~Baldassari, A.~D. White, and P.~Schwaller, ``ChemCrow: Augmenting large-language models with chemistry tools,'' \textit{arXiv preprint arXiv:2304.05376}, 2023.
+
+\bibitem{edwards2022translation}
+C.~Edwards, T.~Lai, K.~Ros, G.~Honke, and H.~Ji, ``Translation between molecules and natural language,'' in \textit{Proc. EMNLP}, 2022, pp.~375--413.
+
+\bibitem{edwards2022molt5}
+C.~Edwards, C.~Zhai, and H.~Ji, ``Text2mol: Cross-modal molecule retrieval with natural language queries,'' in \textit{Proc. EMNLP}, 2021, pp.~595--607.
+
+\bibitem{lu2019vilbert}
+J.~Lu, D.~Batra, D.~Parikh, and S.~Lee, ``ViLBERT: Pretraining task-agnostic visiolinguistic representations for vision-and-language tasks,'' in \textit{Proc. NeurIPS}, 2019, pp.~13--23.
+
+\bibitem{li2020oscar}
+X.~Li, X.~Yin, C.~Li, P.~Zhang, X.~Hu, L.~Zhang, L.~Wang, H.~Hu, L.~Dong, F.~Wei, Y.~Choi, and J.~Gao, ``Oscar: Object-semantics aligned pre-training for vision-language tasks,'' in \textit{Proc. ECCV}, 2020, pp.~121--137.
+
+\bibitem{liu2023moleculestm}
+S.~Liu, W.~Nie, C.~Wang, J.~Lu, Z.~Qiao, L.~Liu, J.~Tang, C.~Xiao, and A.~Anandkumar, ``Multi-modal molecule structure--text model for text-based retrieval and editing,'' \textit{Nature Machine Intelligence}, vol.~5, pp.~1447--1457, 2023.
+
+\bibitem{christofidellis2023text}
+D.~Christofidellis, G.~Giannone, J.~Born, O.~Winber, G.~Manica, and M.~Manica, ``Unifying molecular and textual representations via multi-task language modelling,'' in \textit{Proc. ICML}, 2023.
+
+\bibitem{reimers2019sentence}
+N.~Reimers and I.~Gurevych, ``Sentence-BERT: Sentence embeddings using Siamese BERT-networks,'' in \textit{Proc. EMNLP-IJCNLP}, 2019, pp.~3982--3992.
+
+\bibitem{johnson2019faiss}
+J.~Johnson, M.~Douze, and H.~J{\'e}gou, ``Billion-scale similarity search with GPUs,'' \textit{IEEE Trans. Big Data}, vol.~7, no.~3, pp.~535--547, 2019.
+
+\bibitem{zhang2024tinyllama}
+P.~Zhang \textit{et al.}, ``TinyLlama: An open-source small language model,'' \textit{arXiv preprint arXiv:2401.02385}, 2024.
+
+\bibitem{wang2023selfconsistency}
+X.~Wang \textit{et al.}, ``Self-consistency improves chain of thought reasoning in language models,'' in \textit{Proc. ICLR}, 2023.
+
+\bibitem{wu2018moleculenet}
+Z.~Wu, B.~Ramsundar, E.~N. Feinberg, J.~Gomes, C.~Geniesse, A.~S. Pappu, K.~Leswing, and V.~Pande, ``MoleculeNet: a benchmark for molecular machine learning,'' \textit{Chemical Science}, vol.~9, no.~2, pp.~513--530, 2018.
+
+\bibitem{landrum2016rdkit}
+G.~Landrum, ``RDKit: Open-source cheminformatics software,'' 2016. [Online]. Available: \url{https://www.rdkit.org}
+
+\bibitem{lipinski2001}
+C.~A. Lipinski, F.~Lombardo, B.~W. Dominy, P.~J. Feeney, and A.~D. Adler, ``Experimental and computational approaches to estimate solubility and permeability in drug discovery and development settings,'' \textit{Adv. Drug Deliv. Rev.}, vol.~46, pp.~3--26, 2001.
+
+\bibitem{veber2002}
+D.~F. Veber, S.~R. Johnson, H.-Y. Cheng, B.~R. Smith, K.~W. Ward, and K.~D. Kopple, ``Molecular properties that influence the oral bioavailability of drug candidates,'' \textit{J. Med. Chem.}, vol.~45, no.~12, pp.~2615--2623, 2002.
+
+\bibitem{ghose1999}
+A.~K. Ghose, V.~N. Viswanadhan, and J.~J. Wendoloski, ``A knowledge-based approach in designing combinatorial or medicinal chemistry libraries for drug discovery,'' \textit{J. Comb. Chem.}, vol.~1, no.~1, pp.~55--68, 1999.
+
+\bibitem{egan2000}
+W.~J. Egan, K.~M. Merz, and J.~J. Baldwin, ``Prediction of drug absorption using multivariate statistics,'' \textit{J. Med. Chem.}, vol.~43, no.~21, pp.~3867--3877, 2000.
+
+\bibitem{muegge2001}
+I.~Muegge, S.~L. Heald, and D.~Brittelli, ``Simple selection criteria for drug-like chemical matter,'' \textit{J. Med. Chem.}, vol.~44, no.~12, pp.~1841--1846, 2001.
+
+\bibitem{bickerton2012qed}
+G.~R. Bickerton, G.~V. Paolini, J.~Besnard, S.~Muresan, and A.~L. Hopkins, ``Quantifying the chemical beauty of drugs,'' \textit{Nature Chemistry}, vol.~4, no.~2, pp.~90--98, 2012.
+
+\bibitem{baell2010pains}
+J.~B. Baell and G.~A. Holloway, ``New substructure filters for removal of pan assay interference compounds (PAINS) from screening libraries,'' \textit{J. Med. Chem.}, vol.~53, no.~7, pp.~2719--2740, 2010.
+
+\bibitem{brenk2008}
+R.~Brenk \textit{et al.}, ``Lessons learnt from assembling screening libraries for drug discovery for neglected diseases,'' \textit{ChemMedChem}, vol.~3, no.~3, pp.~435--444, 2008.
+
+\bibitem{ertl2009sascore}
+P.~Ertl and A.~Schuffenhauer, ``Estimation of synthetic accessibility score of drug-like molecules based on molecular complexity and fragment contributions,'' \textit{J. Cheminformatics}, vol.~1, no.~1, pp.~1--11, 2009.
+
+\bibitem{hendrycks2016gelu}
+D.~Hendrycks and K.~Gimpel, ``Gaussian error linear units (GELUs),'' \textit{arXiv preprint arXiv:1606.08415}, 2016.
+
+\bibitem{zdrazil2024chembl}
+B.~Zdrazil \textit{et al.}, ``The ChEMBL database in 2023: a drug discovery platform spanning genomics, chemical biology and pharmacology,'' \textit{Nucleic Acids Research}, vol.~52, no.~D1, pp.~D1180--D1192, 2024.
+
+\bibitem{swanson2024admetai}
+K.~Swanson \textit{et al.}, ``ADMET-AI: A machine learning ADMET platform for evaluation of large-scale chemical libraries,'' \textit{Bioinformatics}, vol.~40, no.~7, p.~btae416, 2024.
+
+\end{thebibliography}
+
+\end{document}

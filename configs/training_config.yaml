@@ -1,0 +1,203 @@
+# Training Configuration
+
+# General settings
+general:
+  project_name: "helios"
+  experiment_name: "default"
+  output_dir: "outputs"
+  logging_dir: "logs"
+  seed: 42
+  
+  # Device
+  device: "cuda"  # cuda, cpu, mps
+  mixed_precision: "fp16"  # no, fp16, bf16
+  gradient_checkpointing: true
+  
+  # Logging
+  logging:
+    use_wandb: true
+    wandb_project: "helios-chemistry-ai"
+    log_interval: 10
+    save_interval: 500
+    eval_interval: 100
+    
+# Phase 2: Graphormer Training
+graphormer_training:
+  # Data
+  data:
+    train_file: "data/final/train.csv"
+    val_file: "data/final/val.csv"
+    test_file: "data/final/test.csv"
+    
+  # Training hyperparameters
+  batch_size: 32
+  num_workers: 4
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  max_epochs: 100
+  warmup_steps: 1000
+  
+  # Optimization
+  optimizer: "adamw"
+  scheduler: "cosine"
+  gradient_clip: 1.0
+  
+  # Regularization
+  dropout: 0.1
+  label_smoothing: 0.0
+  
+  # Task-specific
+  task_type: "multitask"  # regression, classification, multitask
+  loss_function: "mse"  # mse, mae, bce, ce
+  
+  # Evaluation metrics
+  metrics:
+    - "rmse"
+    - "mae"
+    - "r2"
+    - "pearson"
+    - "spearman"
+    
+# Phase 3: RAG Training
+rag_training:
+  # Data
+  data:
+    corpus_file: "data/rag/corpus.jsonl"
+    query_pairs_file: "data/rag/query_pairs.jsonl"
+    
+  # Training hyperparameters
+  batch_size: 16
+  learning_rate: 0.00002
+  max_epochs: 3
+  warmup_ratio: 0.1
+  
+  # Loss
+  loss: "contrastive"  # contrastive, triplet
+  margin: 0.5
+  temperature: 0.05
+  
+  # Hard negative mining
+  use_hard_negatives: true
+  num_hard_negatives: 5
+  
+# Phase 4: LLM Training
+llm_training:
+  # Continued pretraining
+  pretraining:
+    enabled: false
+    corpus_dir: "data/chemistry_corpus"
+    batch_size: 4
+    gradient_accumulation_steps: 16
+    learning_rate: 0.00001
+    max_steps: 50000
+    warmup_ratio: 0.03
+    sequence_length: 2048
+    
+  # Instruction finetuning
+  instruction_tuning:
+    enabled: true
+    dataset_file: "data/instructions/chemistry_qa.jsonl"
+    batch_size: 4
+    gradient_accumulation_steps: 4
+    learning_rate: 0.0002
+    max_epochs: 3
+    warmup_ratio: 0.03
+    max_length: 2048
+    
+    # Data augmentation
+    augmentation:
+      use_synonyms: true
+      use_rephrasing: true
+      
+  # Preference tuning
+  preference_tuning:
+    enabled: false
+    method: "dpo"
+    dataset_file: "data/preferences/pairs.jsonl"
+    batch_size: 2
+    learning_rate: 0.00005
+    max_epochs: 1
+    beta: 0.1
+
+# Phase 5: Fusion Training
+fusion_training:
+  # Data
+  data:
+    train_file: "data/fusion/train.jsonl"
+    val_file: "data/fusion/val.jsonl"
+    
+    # Each sample contains:
+    # - query (text)
+    # - molecule_smiles (string)
+    # - retrieved_passages (list)
+    # - target_response (string)
+    # - property_labels (dict, optional)
+    
+  # Training hyperparameters
+  batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 0.0001
+  max_epochs: 10
+  warmup_ratio: 0.1
+  
+  # Loss configuration
+  loss_weights:
+    language_loss: 1.0
+    property_loss: 0.5
+    grounding_loss: 0.3
+    alignment_loss: 0.2
+    
+  # Component freezing
+  freeze_components:
+    graphormer: false
+    rag_encoder: true
+    llm_base: false  # Use LoRA
+    
+  # Optimization
+  optimizer: "adamw"
+  scheduler: "cosine"
+  gradient_clip: 1.0
+
+# Distributed training
+distributed:
+  enabled: false
+  backend: "nccl"
+  world_size: 1
+  
+  # DeepSpeed
+  use_deepspeed: false
+  deepspeed_config: "configs/deepspeed_config.json"
+  
+  # FSDP (PyTorch)
+  use_fsdp: false
+  fsdp_config:
+    sharding_strategy: "FULL_SHARD"
+    
+# Checkpointing
+checkpointing:
+  save_strategy: "steps"  # steps, epoch
+  save_steps: 500
+  save_total_limit: 3
+  load_best_model_at_end: true
+  metric_for_best_model: "eval_loss"
+  greater_is_better: false
+  
+# Early stopping
+early_stopping:
+  enabled: true
+  patience: 5
+  threshold: 0.0001
+  
+# Evaluation
+evaluation:
+  strategy: "steps"  # steps, epoch
+  eval_steps: 100
+  per_device_eval_batch_size: 16
+  
+# Inference (for validation during training)
+inference:
+  max_new_tokens: 512
+  temperature: 0.7
+  top_p: 0.9
+  num_beams: 1
+  do_sample: true

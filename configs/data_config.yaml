@@ -1,0 +1,101 @@
+# Data Pipeline Configuration
+
+data:
+  # Raw data sources
+  sources:
+    chembl:
+      version: "33"
+      url: "https://ftp.ebi.ac.uk/pub/databases/chembl/ChEMBLdb/latest/"
+      download: true
+    
+    pubchem:
+      base_url: "https://pubchem.ncbi.nlm.nih.gov/rest/pug/"
+      bioassay_filter:
+        min_compounds: 100
+        max_compounds: 1000000
+        has_activity_data: true
+    
+    zinc:
+      download: false  # Optional unlabeled data
+      subset: "drug-like"
+      max_compounds: 1000000
+    
+    pubmed:
+      download: false  # Optional for RAG
+      query: "chemistry OR drug discovery OR molecular properties"
+      max_articles: 100000
+
+  # Cleaning parameters
+  cleaning:
+    canonicalize_smiles: true
+    remove_salts: true
+    neutralize_charges: true
+    remove_mixtures: true
+    deduplicate: true
+    
+    filters:
+      min_mw: 0
+      max_mw: 800
+      min_heavy_atoms: 3
+      max_heavy_atoms: 50
+      min_rings: 0
+      max_rings: 6
+      allow_metals: false
+
+  # Label preparation
+  labels:
+    activity_types:
+      - "IC50"
+      - "Ki"
+      - "Kd"
+      - "EC50"
+      - "AC50"
+    
+    # Convert to pActivity = -log10(value_in_molar)
+    convert_to_log: true
+    
+    filters:
+      min_confidence: 5  # ChEMBL confidence score
+      remove_missing: true
+      remove_inconsistent: true
+      activity_threshold: 10000  # nM for classification
+    
+    classification:
+      active_threshold: 1000  # nM
+      inactive_threshold: 10000  # nM
+      # Between = intermediate (usually excluded)
+
+  # Output paths
+  output:
+    raw_dir: "data/raw"
+    processed_dir: "data/processed"
+    final_dir: "data/final"
+    
+    files:
+      chembl_clean: "chembl_clean.csv"
+      pubchem_clean: "pubchem_clean.csv"
+      master_training: "master_training.csv"
+      master_unlabeled: "master_unlabeled.csv"
+      train_split: "train.csv"
+      val_split: "val.csv"
+      test_split: "test.csv"
+
+  # Data splitting
+  split:
+    train: 0.8
+    val: 0.1
+    test: 0.1
+    random_seed: 42
+    stratify_by: "target_id"  # For balanced splits
+
+  # RAG corpus
+  rag_corpus:
+    sources:
+      - "pubchem_descriptions"
+      - "chembl_annotations"
+      - "fda_labels"
+      - "pubmed_abstracts"
+    
+    chunk_size: 512
+    chunk_overlap: 50
+    output_file: "rag_corpus.jsonl"

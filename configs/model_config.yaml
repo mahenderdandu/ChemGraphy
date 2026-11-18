@@ -1,0 +1,242 @@
+# Model Configuration
+
+# Graphormer Configuration
+graphormer:
+  # Pretrained model
+  pretrained:
+    name: "microsoft/graphormer-base"
+    checkpoint: "pcqm4m"  # PCQM4M-LSC pretrained
+    embedding_dim: 768
+    
+  # Architecture
+  architecture:
+    num_layers: 12
+    num_heads: 32
+    embedding_dim: 768
+    ffn_embedding_dim: 768
+    dropout: 0.1
+    attention_dropout: 0.1
+    
+  # Graph features
+  graph_features:
+    max_nodes: 512
+    multi_hop_max_dist: 5
+    spatial_pos_max: 512
+    edge_type: "multi_hop"
+    
+  # Finetuning
+  finetuning:
+    freeze_encoder: false
+    freeze_layers: 0  # Number of layers to freeze
+    
+    # Task heads
+    tasks:
+      - name: "regression"
+        type: "regression"
+        output_dim: 1
+        dropout: 0.1
+      
+      - name: "classification"
+        type: "classification"
+        num_classes: 2
+        dropout: 0.1
+      
+      - name: "multitask"
+        type: "multitask"
+        tasks:
+          - {name: "pic50", type: "regression", weight: 1.0}
+          - {name: "active", type: "classification", weight: 0.5}
+    
+  # Training
+  training:
+    batch_size: 32
+    learning_rate: 0.0001
+    weight_decay: 0.01
+    max_epochs: 100
+    warmup_steps: 1000
+    gradient_clip: 1.0
+    
+    optimizer: "adamw"
+    scheduler: "cosine"
+    
+    early_stopping:
+      patience: 10
+      metric: "val_rmse"
+      mode: "min"
+
+# RAG Configuration
+rag:
+  # Embedding model
+  encoder:
+    name: "BAAI/bge-large-en-v1.5"
+    embedding_dim: 1024
+    max_length: 512
+    normalize_embeddings: true
+    
+  # Vector index
+  index:
+    type: "faiss"  # faiss, weaviate, qdrant, milvus
+    metric: "cosine"  # cosine, l2, ip
+    index_type: "HNSW"  # Flat, HNSW, IVF
+    
+    # HNSW parameters
+    hnsw_m: 32
+    hnsw_ef_construction: 200
+    hnsw_ef_search: 100
+    
+  # Retrieval
+  retrieval:
+    top_k: 10
+    min_score: 0.5
+    rerank: true
+    rerank_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    rerank_top_k: 5
+    
+  # Training (optional finetuning)
+  training:
+    enabled: true
+    dataset: "custom_pairs"  # query-passage pairs
+    batch_size: 16
+    learning_rate: 0.00002
+    max_epochs: 3
+    loss: "contrastive"  # contrastive, triplet
+    
+# LLM Configuration
+llm:
+  # Base model
+  base_model:
+    name: "mistralai/Mistral-7B-Instruct-v0.2"
+    # alternatives:
+    # - "meta-llama/Llama-2-7b-hf"
+    # - "Qwen/Qwen-7B"
+    
+  # Model loading
+  loading:
+    load_in_8bit: false
+    load_in_4bit: true  # Use 4-bit quantization
+    device_map: "auto"
+    torch_dtype: "float16"
+    
+  # LoRA configuration (for efficient finetuning)
+  lora:
+    enabled: true
+    r: 64
+    lora_alpha: 16
+    lora_dropout: 0.1
+    target_modules:
+      - "q_proj"
+      - "k_proj"
+      - "v_proj"
+      - "o_proj"
+      - "gate_proj"
+      - "up_proj"
+      - "down_proj"
+    bias: "none"
+    task_type: "CAUSAL_LM"
+    
+  # Generation
+  generation:
+    max_new_tokens: 1024
+    temperature: 0.7
+    top_p: 0.9
+    top_k: 50
+    repetition_penalty: 1.1
+    do_sample: true
+    
+  # Continued pretraining
+  pretraining:
+    enabled: false
+    corpus: "chemistry_corpus"
+    batch_size: 4
+    learning_rate: 0.00001
+    max_steps: 50000
+    warmup_ratio: 0.03
+    
+  # Instruction finetuning
+  instruction_tuning:
+    enabled: true
+    dataset: "chemistry_instructions"
+    batch_size: 4
+    gradient_accumulation_steps: 4
+    learning_rate: 0.0002
+    max_epochs: 3
+    warmup_ratio: 0.03
+    
+    # Prompt template
+    prompt_template: |
+      <s>[INST] {instruction}
+      
+      Context: {context}
+      Molecule: {molecule_info}
+      
+      {question} [/INST]
+    
+  # Preference tuning (DPO/PPO)
+  preference_tuning:
+    enabled: false
+    method: "dpo"  # dpo, ppo
+    dataset: "preference_pairs"
+    beta: 0.1
+    
+
+# Fusion Layer Configuration
+fusion:
+  # Architecture
+  architecture:
+    type: "cross_attention"
+    
+    # Input dimensions
+    text_dim: 1024  # From RAG encoder
+    molecule_dim: 768  # From Graphormer
+    llm_dim: 4096  # From LLM hidden states
+    
+    # Fusion parameters
+    num_fusion_layers: 4
+    num_heads: 8
+    hidden_dim: 2048
+    dropout: 0.1
+    
+    # Output
+    output_dim: 4096  # Project to LLM dimension
+    
+  # Training
+  training:
+    batch_size: 8
+    gradient_accumulation_steps: 4
+    learning_rate: 0.0001
+    max_epochs: 10
+    warmup_ratio: 0.1
+    
+    # Loss weights
+    loss_weights:
+      language_loss: 1.0
+      property_prediction_loss: 0.5
+      grounding_loss: 0.3
+      
+    # Freezing strategy
+    freeze_graphormer: false
+    freeze_rag_encoder: true
+    freeze_llm: false  # Use LoRA instead
+    
+# Safety Configuration
+safety:
+  # Hallucination prevention
+  hallucination_control:
+    enabled: true
+    no_context_threshold: 0.3
+    forced_citation: true
+    confidence_threshold: 0.6
+    
+  # Cross-checking
+  cross_check:
+    enabled: true
+    databases:
+      - "pubchem"
+      - "chembl"
+    tolerance: 0.2  # 20% tolerance for predictions
+    
+  # Disclaimers
+  disclaimers:
+    unknown_compounds: "This compound is not in our database. Predictions should be validated experimentally."
+    low_confidence: "Low confidence prediction. Please verify with experimental data."
+    no_literature: "No literature references found. Response is based on model predictions only."
